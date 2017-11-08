@@ -214,12 +214,14 @@ public class UploaderModule extends ReactContextBaseJavaModule {
         while (keys.hasNextKey()) {
           String key = keys.nextKey();
 
-          if (parameters.getType(key) != ReadableType.String) {
-            promise.reject(new IllegalArgumentException("Parameters must be string key/values. Value was invalid for '" + key + "'"));
-            return;
-          }
-
-          request.addParameter(key, parameters.getString(key));
+          if (parameters.getType(key) == ReadableType.String)
+            request.addParameter(key, parameters.getString(key));
+          
+          else if (parameters.getType(key) == ReadableType.Number)
+            request.addParameter(key, parameters.getInt(key));
+          
+          else if (parameters.getType(key) == ReadableType.Boolean)
+            request.addParameter(key, parameters.getBoolean(key));
         }
       }
 
