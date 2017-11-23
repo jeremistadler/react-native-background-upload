@@ -150,10 +150,15 @@ public class UploaderModule extends ReactContextBaseJavaModule {
         }
 
         @Override
-        public void onError(Context context, UploadInfo uploadInfo, Exception exception) {
+        public void onError(Context context, UploadInfo uploadInfo, ServerResponse response, Exception exception) {
           WritableMap params = Arguments.createMap();
           params.putString("id", customUploadId != null ? customUploadId : uploadInfo.getUploadId());
           params.putString("error", exception.getMessage());
+          try {
+              params.putInt("responseCode", response.getHttpCode());
+              params.putString("responseBody", response.getBodyAsString());
+          } catch (Exception ex) {}
+
           sendEvent("error", params);
         }
 
@@ -214,14 +219,12 @@ public class UploaderModule extends ReactContextBaseJavaModule {
         while (keys.hasNextKey()) {
           String key = keys.nextKey();
 
-          if (parameters.getType(key) == ReadableType.String)
-            request.addParameter(key, parameters.getString(key));
-          
-          else if (parameters.getType(key) == ReadableType.Number)
-            request.addParameter(key, parameters.getInt(key));
-          
-          else if (parameters.getType(key) == ReadableType.Boolean)
-            request.addParameter(key, parameters.getBoolean(key));
+          if (parameters.getType(key) != ReadableType.String) {
+            promise.reject(new IllegalArgumentException("Parameters must be string key/values. Value was invalid for '" + key + "'"));
+            return;
+          }
+
+          request.addParameter(key, parameters.getString(key));
         }
       }
 
