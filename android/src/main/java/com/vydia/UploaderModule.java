@@ -1,6 +1,12 @@
 package com.vydia.RNUploader;
 
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.Context;
+import android.content.res.Resources;
+import android.graphics.Color;
+import android.os.Build;
 import android.support.annotation.Nullable;
 import android.util.Log;
 import android.webkit.MimeTypeMap;
@@ -33,220 +39,248 @@ import java.io.File;
  * Created by stephen on 12/8/16.
  */
 public class UploaderModule extends ReactContextBaseJavaModule {
-  private static final String TAG = "UploaderBridge";
+    private static final String TAG = "UploaderBridge";
 
-  public UploaderModule(ReactApplicationContext reactContext) {
-    super(reactContext);
-    UploadService.NAMESPACE = reactContext.getApplicationInfo().packageName;
-    UploadService.HTTP_STACK = new OkHttpStack();
-  }
-
-  @Override
-  public String getName() {
-    return "RNFileUploader";
-  }
-
-  /*
-  Sends an event to the JS module.
-   */
-  private void sendEvent(String eventName, @Nullable WritableMap params) {
-    this.getReactApplicationContext().getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class).emit("RNFileUploader-" + eventName, params);
-  }
-
-  /*
-  Gets file information for the path specified.  Example valid path is: /storage/extSdCard/DCIM/Camera/20161116_074726.mp4
-  Returns an object such as: {extension: "mp4", size: "3804316", exists: true, mimeType: "video/mp4", name: "20161116_074726.mp4"}
-   */
-  @ReactMethod
-  public void getFileInfo(String path, final Promise promise) {
-    try {
-      WritableMap params = Arguments.createMap();
-      File fileInfo = new File(path);
-      params.putString("name", fileInfo.getName());
-      if (!fileInfo.exists() || !fileInfo.isFile())
-      {
-        params.putBoolean("exists", false);
-      }
-      else
-      {
-        params.putBoolean("exists", true);
-        params.putString("size",Long.toString(fileInfo.length())); //use string form of long because there is no putLong and converting to int results in a max size of 17.2 gb, which could happen.  Javascript will need to convert it to a number
-        String extension = MimeTypeMap.getFileExtensionFromUrl(path);
-        params.putString("extension",extension);
-        String mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.toLowerCase());
-        params.putString("mimeType", mimeType);
-      }
-
-      promise.resolve(params);
-    } catch (Exception exc) {
-      Log.e(TAG, exc.getMessage(), exc);
-      promise.reject(exc);
-    }
-  }
-
-  /*
-   * Starts a file upload.
-   * Returns a promise with the string ID of the upload.
-   */
-  @ReactMethod
-  public void startUpload(ReadableMap options, final Promise promise) {
-    for (String key : new String[]{"url", "path"}) {
-      if (!options.hasKey(key)) {
-        promise.reject(new IllegalArgumentException("Missing '" + key + "' field."));
-        return;
-      }
-      if (options.getType(key) != ReadableType.String) {
-        promise.reject(new IllegalArgumentException(key + " must be a string."));
-        return;
-      }
+    public UploaderModule(ReactApplicationContext reactContext) {
+        super(reactContext);
+        UploadService.NAMESPACE = reactContext.getApplicationInfo().packageName;
+        UploadService.HTTP_STACK = new OkHttpStack();
     }
 
-    if (options.hasKey("headers") && options.getType("headers") != ReadableType.Map) {
-      promise.reject(new IllegalArgumentException("headers must be a hash."));
-      return;
+    @Override
+    public String getName() {
+        return "RNFileUploader";
     }
 
-    if (options.hasKey("notification") && options.getType("notification") != ReadableType.Map) {
-      promise.reject(new IllegalArgumentException("notification must be a hash."));
-      return;
+    /*
+    Sends an event to the JS module.
+     */
+    private void sendEvent(String eventName, @Nullable WritableMap params) {
+        this.getReactApplicationContext().getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class).emit("RNFileUploader-" + eventName, params);
     }
 
-    String requestType = "raw";
+    /*
+    Gets file information for the path specified.  Example valid path is: /storage/extSdCard/DCIM/Camera/20161116_074726.mp4
+    Returns an object such as: {extension: "mp4", size: "3804316", exists: true, mimeType: "video/mp4", name: "20161116_074726.mp4"}
+     */
+    @ReactMethod
+    public void getFileInfo(String path, final Promise promise) {
+        try {
+            WritableMap params = Arguments.createMap();
+            File fileInfo = new File(path);
+            params.putString("name", fileInfo.getName());
+            if (!fileInfo.exists() || !fileInfo.isFile()) {
+                params.putBoolean("exists", false);
+            } else {
+                params.putBoolean("exists", true);
+                params.putString("size", Long.toString(fileInfo.length())); //use string form of long because there is no putLong and converting to int results in a max size of 17.2 gb, which could happen.  Javascript will need to convert it to a number
+                String extension = MimeTypeMap.getFileExtensionFromUrl(path);
+                params.putString("extension", extension);
+                String mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.toLowerCase());
+                params.putString("mimeType", mimeType);
+            }
 
-    if (options.hasKey("type")) {
-      requestType = options.getString("type");
-      if (requestType == null) {
-        promise.reject(new IllegalArgumentException("type must be string."));
-        return;
-      }
-
-      if (!requestType.equals("raw") && !requestType.equals("multipart")) {
-        promise.reject(new IllegalArgumentException("type should be string: raw or multipart."));
-        return;
-      }
+            promise.resolve(params);
+        } catch (Exception exc) {
+            Log.e(TAG, exc.getMessage(), exc);
+            promise.reject(exc);
+        }
     }
 
-    WritableMap notification = new WritableNativeMap();
-    notification.putBoolean("enabled", true);
-
-    if (options.hasKey("notification")) {
-      notification.merge(options.getMap("notification"));
-    }
-
-    String url = options.getString("url");
-    String filePath = options.getString("path");
-    String method = options.hasKey("method") && options.getType("method") == ReadableType.String ? options.getString("method") : "POST";
-
-    final String customUploadId = options.hasKey("customUploadId") && options.getType("method") == ReadableType.String ? options.getString("customUploadId") : null;
-
-    try {
-      UploadStatusDelegate statusDelegate = new UploadStatusDelegate() {
-        @Override
-        public void onProgress(Context context, UploadInfo uploadInfo) {
-          WritableMap params = Arguments.createMap();
-          params.putString("id", customUploadId != null ? customUploadId : uploadInfo.getUploadId());
-          params.putInt("progress", uploadInfo.getProgressPercent()); //0-100
-          sendEvent("progress", params);
+    /*
+     * Starts a file upload.
+     * Returns a promise with the string ID of the upload.
+     */
+    @ReactMethod
+    public void startUpload(ReadableMap options, final Promise promise) {
+        for (String key : new String[]{"url", "path"}) {
+            if (!options.hasKey(key)) {
+                promise.reject(new IllegalArgumentException("Missing '" + key + "' field."));
+                return;
+            }
+            if (options.getType(key) != ReadableType.String) {
+                promise.reject(new IllegalArgumentException(key + " must be a string."));
+                return;
+            }
         }
 
-        @Override
-        public void onError(Context context, UploadInfo uploadInfo, ServerResponse response, Exception exception) {
-          WritableMap params = Arguments.createMap();
-          params.putString("id", customUploadId != null ? customUploadId : uploadInfo.getUploadId());
-          params.putString("error", exception.getMessage());
-          try {
-              params.putInt("responseCode", response.getHttpCode());
-              params.putString("responseBody", response.getBodyAsString());
-          } catch (Exception ex) {}
-
-          sendEvent("error", params);
-        }
-
-        @Override
-        public void onCompleted(Context context, UploadInfo uploadInfo, ServerResponse serverResponse) {
-          WritableMap params = Arguments.createMap();
-          params.putString("id", customUploadId != null ? customUploadId : uploadInfo.getUploadId());
-          params.putInt("responseCode", serverResponse.getHttpCode());
-          params.putString("responseBody", serverResponse.getBodyAsString());
-          sendEvent("completed", params);
-        }
-
-        @Override
-        public void onCancelled(Context context, UploadInfo uploadInfo) {
-          WritableMap params = Arguments.createMap();
-          params.putString("id", customUploadId != null ? customUploadId : uploadInfo.getUploadId());
-          sendEvent("cancelled", params);
-        }
-      };
-
-      HttpUploadRequest<?> request;
-
-      if (requestType.equals("raw")) {
-        request = new BinaryUploadRequest(this.getReactApplicationContext(), customUploadId, url)
-                .setFileToUpload(filePath);
-      } else {
-        if (!options.hasKey("field")) {
-          promise.reject(new IllegalArgumentException("field is required field for multipart type."));
-          return;
-        }
-
-        if (options.getType("field") != ReadableType.String) {
-          promise.reject(new IllegalArgumentException("field must be string."));
-          return;
-        }
-
-        request = new MultipartUploadRequest(this.getReactApplicationContext(), customUploadId, url)
-                .addFileToUpload(filePath, options.getString("field"));
-      }
-
-      request.setMethod(method)
-        .setMaxRetries(2)
-        .setDelegate(statusDelegate);
-
-      if (notification.getBoolean("enabled")) {
-        request.setNotificationConfig(new UploadNotificationConfig());
-      }
-
-      if (options.hasKey("parameters")) {
-        if (requestType.equals("raw")) {
-          promise.reject(new IllegalArgumentException("Parameters supported only in multipart type"));
-          return;
-        }
-
-        ReadableMap parameters = options.getMap("parameters");
-        ReadableMapKeySetIterator keys = parameters.keySetIterator();
-
-        while (keys.hasNextKey()) {
-          String key = keys.nextKey();
-
-          if (parameters.getType(key) != ReadableType.String) {
-            promise.reject(new IllegalArgumentException("Parameters must be string key/values. Value was invalid for '" + key + "'"));
+        if (options.hasKey("headers") && options.getType("headers") != ReadableType.Map) {
+            promise.reject(new IllegalArgumentException("headers must be a hash."));
             return;
-          }
-
-          request.addParameter(key, parameters.getString(key));
         }
-      }
 
-      if (options.hasKey("headers")) {
-        ReadableMap headers = options.getMap("headers");
-        ReadableMapKeySetIterator keys = headers.keySetIterator();
-        while (keys.hasNextKey()) {
-          String key = keys.nextKey();
-          if (headers.getType(key) != ReadableType.String) {
-            promise.reject(new IllegalArgumentException("Headers must be string key/values.  Value was invalid for '" + key + "'"));
+        if (options.hasKey("notification") && options.getType("notification") != ReadableType.Map) {
+            promise.reject(new IllegalArgumentException("notification must be a hash."));
             return;
-          }
-          request.addHeader(key, headers.getString(key));
         }
-      }
 
-      String uploadId = request.startUpload();
-      promise.resolve(customUploadId != null ? customUploadId : uploadId);
-    } catch (Exception exc) {
-      Log.e(TAG, exc.getMessage(), exc);
-      promise.reject(exc);
+        String requestType = "raw";
+
+        if (options.hasKey("type")) {
+            requestType = options.getString("type");
+            if (requestType == null) {
+                promise.reject(new IllegalArgumentException("type must be string."));
+                return;
+            }
+
+            if (!requestType.equals("raw") && !requestType.equals("multipart")) {
+                promise.reject(new IllegalArgumentException("type should be string: raw or multipart."));
+                return;
+            }
+        }
+
+        WritableMap notification = new WritableNativeMap();
+        notification.putBoolean("enabled", true);
+
+        if (options.hasKey("notification")) {
+            notification.merge(options.getMap("notification"));
+        }
+
+        String url = options.getString("url");
+        String filePath = options.getString("path");
+        String method = options.hasKey("method") && options.getType("method") == ReadableType.String ? options.getString("method") : "POST";
+
+        final String customUploadId = options.hasKey("customUploadId") && options.getType("method") == ReadableType.String ? options.getString("customUploadId") : null;
+
+        try {
+            UploadStatusDelegate statusDelegate = new UploadStatusDelegate() {
+                @Override
+                public void onProgress(Context context, UploadInfo uploadInfo) {
+                    WritableMap params = Arguments.createMap();
+                    params.putString("id", customUploadId != null ? customUploadId : uploadInfo.getUploadId());
+                    params.putInt("progress", uploadInfo.getProgressPercent()); //0-100
+                    sendEvent("progress", params);
+                }
+
+                @Override
+                public void onError(Context context, UploadInfo uploadInfo, ServerResponse response, Exception exception) {
+                    WritableMap params = Arguments.createMap();
+                    params.putString("id", customUploadId != null ? customUploadId : uploadInfo.getUploadId());
+                    params.putString("error", exception.getMessage());
+                    try {
+                        params.putInt("responseCode", response.getHttpCode());
+                        params.putString("responseBody", response.getBodyAsString());
+                    } catch (Exception ex) {
+                    }
+
+                    sendEvent("error", params);
+                }
+
+                @Override
+                public void onCompleted(Context context, UploadInfo uploadInfo, ServerResponse serverResponse) {
+                    WritableMap params = Arguments.createMap();
+                    params.putString("id", customUploadId != null ? customUploadId : uploadInfo.getUploadId());
+                    params.putInt("responseCode", serverResponse.getHttpCode());
+                    params.putString("responseBody", serverResponse.getBodyAsString());
+                    sendEvent("completed", params);
+                }
+
+                @Override
+                public void onCancelled(Context context, UploadInfo uploadInfo) {
+                    WritableMap params = Arguments.createMap();
+                    params.putString("id", customUploadId != null ? customUploadId : uploadInfo.getUploadId());
+                    sendEvent("cancelled", params);
+                }
+            };
+
+            HttpUploadRequest<?> request;
+
+            if (requestType.equals("raw")) {
+                request = new BinaryUploadRequest(this.getReactApplicationContext(), customUploadId, url)
+                        .setFileToUpload(filePath);
+            } else {
+                if (!options.hasKey("field")) {
+                    promise.reject(new IllegalArgumentException("field is required field for multipart type."));
+                    return;
+                }
+
+                if (options.getType("field") != ReadableType.String) {
+                    promise.reject(new IllegalArgumentException("field must be string."));
+                    return;
+                }
+
+                request = new MultipartUploadRequest(this.getReactApplicationContext(), customUploadId, url)
+                        .addFileToUpload(filePath, options.getString("field"));
+            }
+
+            request.setMethod(method)
+                    .setMaxRetries(2)
+                    .setDelegate(statusDelegate);
+
+            if (notification.getBoolean("enabled")) {
+                UploadNotificationConfig config = new UploadNotificationConfig();
+                Context ctx = getReactApplicationContext();
+
+                try {
+                    Resources res = ctx.getResources();
+                    String packageName = ctx.getPackageName();
+                    int smallIconResId = res.getIdentifier("ic_stat_name", "drawable", packageName);
+
+                    if (smallIconResId != 0)
+                        config.setIconForAllStatuses(smallIconResId);
+                } catch (Exception ex) {
+
+                }
+
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    NotificationChannel mChannel = new NotificationChannel(
+                            "fileupload",
+                            "Audio Upload",
+                            NotificationManager.IMPORTANCE_LOW
+                    );
+                    mChannel.setDescription("Uploads audio files");
+                    mChannel.setShowBadge(false);
+                    mChannel.enableVibration(false);
+                    mChannel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+                    ((NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE)).createNotificationChannel(mChannel);
+                }
+
+                config.setRingToneEnabled(false);
+                config.setIconColorForAllStatuses(Color.parseColor("#ab40f7"));
+                config.setNotificationChannelId("fileupload");
+                request.setNotificationConfig(config);
+            }
+
+            if (options.hasKey("parameters")) {
+                if (requestType.equals("raw")) {
+                    promise.reject(new IllegalArgumentException("Parameters supported only in multipart type"));
+                    return;
+                }
+
+                ReadableMap parameters = options.getMap("parameters");
+                ReadableMapKeySetIterator keys = parameters.keySetIterator();
+
+                while (keys.hasNextKey()) {
+                    String key = keys.nextKey();
+
+                    if (parameters.getType(key) != ReadableType.String) {
+                        promise.reject(new IllegalArgumentException("Parameters must be string key/values. Value was invalid for '" + key + "'"));
+                        return;
+                    }
+
+                    request.addParameter(key, parameters.getString(key));
+                }
+            }
+
+            if (options.hasKey("headers")) {
+                ReadableMap headers = options.getMap("headers");
+                ReadableMapKeySetIterator keys = headers.keySetIterator();
+                while (keys.hasNextKey()) {
+                    String key = keys.nextKey();
+                    if (headers.getType(key) != ReadableType.String) {
+                        promise.reject(new IllegalArgumentException("Headers must be string key/values.  Value was invalid for '" + key + "'"));
+                        return;
+                    }
+                    request.addHeader(key, headers.getString(key));
+                }
+            }
+
+            String uploadId = request.startUpload();
+            promise.resolve(customUploadId != null ? customUploadId : uploadId);
+        } catch (Exception exc) {
+            Log.e(TAG, exc.getMessage(), exc);
+            promise.reject(exc);
+        }
     }
-  }
-
 }
